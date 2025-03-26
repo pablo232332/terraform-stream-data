@@ -1,0 +1,110 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH != "main"  && $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - when: always
+
+image:
+    name: hashicorp/terraform
+    entrypoint: [""]
+cache:
+    - key: $CI_PIPELINE_ID-terraform-cache
+      paths:
+        - .terraform/
+        - .terraform.lock.hcl
+
+variables:
+  STATEFILE_NAME: "terraform.tfstate"
+  TF_ADDRESS: "https://gitlab.com/api/v4/projects/<01234>/terraform/state/<test>"
+  TF_USERNAME: ${GITLAB_USERNAME}
+  TF_PASSWORD: ${GITLAB_TOKEN}
+
+stages:
+  - format
+  - init
+  - validate
+  - plan
+  - apply
+  - destroy
+
+format:
+  stage: format
+  script:
+  - terraform fmt
+  cache: []
+  allow_failure: true
+
+download_provider:
+  stage: init
+  before_script:
+    - cd setups  
+  script:
+    - >-
+      terraform init 
+      -backend-config="address=${TF_ADDRESS}"
+      -backend-config="lock_address=${TF_ADDRESS}/lock"
+      -backend-config="unlock_address=${TF_ADDRESS}/lock"
+      -backend-config="username=${TF_USERNAME}"
+      -backend-config="password=${TF_PASSWORD}"
+      -backend-config="unlock_method=DELETE"
+      -backend-config="retry_wait_min=5"
+  cache:
+    key: terraform-cache  
+    paths:
+      - setups/.terraform/
+      - setups/.terraform.lock.hcl  
+  artifacts:
+    paths:
+      - setups/.terraform/
+
+validate:
+  stage: validate
+  before_script:
+    - cd setups  
+  script:
+    - terraform validate
+  cache:  
+    key: terraform-cache
+    paths:
+      - setups/.terraform/
+  allow_failure: true
+
+plan:
+  stage: plan
+  before_script:
+    - cd setups
+  script:
+    - terraform plan
+  cache:  
+    key: terraform-cache
+    paths:
+      - setups/.terraform/
+
+apply_configuration:
+  needs:
+    - plan
+  when: manual
+  stage: apply
+  before_script:
+    - cd setups
+    - export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+    - export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+  script:
+    - terraform apply -auto-approve
+  cache:
+    key: terraform-cache
+    paths:
+      - setups/.terraform/
+    policy: pull-push
+
+destroy_infra:
+  needs:
+    - apply_configuration  
+  when: manual
+  stage: destroy
+  before_script:
+    - cd setups
+    - export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+    - export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY 
+  script:
+    - terraform destroy -auto-approve
