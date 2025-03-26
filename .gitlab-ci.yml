@@ -81,7 +81,7 @@ plan:
       - setups/.terraform/
 
 apply_configuration:
-  needs:
+  dependencies:
     - plan
   when: manual
   stage: apply
